@@ -1,0 +1,95 @@
+$date
+	Thu Apr 16 17:22:59 2026
+$end
+$version
+	Icarus Verilog
+$end
+$timescale
+	1ps
+$end
+$scope module tb_ni5781_ai_to_adin12 $end
+$var wire 12 ! adin [11:0] $end
+$var reg 16 " ai_raw [15:0] $end
+$var integer 32 # errors [31:0] $end
+$var reg 2 $ map_mode [1:0] $end
+$scope module dut $end
+$var wire 16 % ai_raw [15:0] $end
+$var wire 2 & map_mode [1:0] $end
+$var reg 12 ' adin [11:0] $end
+$var reg 16 ( mapped_tmp [15:0] $end
+$upscope $end
+$scope task expect $end
+$var reg 12 ) expected_adin [11:0] $end
+$var reg 16 * in_ai_raw [15:0] $end
+$var reg 2 + in_map_mode [1:0] $end
+$upscope $end
+$upscope $end
+$enddefinitions $end
+#0
+$dumpvars
+b0 +
+b101010111100 *
+b101010111100 )
+bx (
+b101010111100 '
+b0 &
+b101010111100 %
+b0 $
+b0 #
+b101010111100 "
+b101010111100 !
+$end
+#1000
+b100000000000 '
+b100000000000 !
+b100000000000 (
+b1 $
+b1 &
+b0 "
+b0 %
+b100000000000 )
+b1 +
+b0 *
+#2000
+b111111111111 '
+b111111111111 !
+b111111111111 (
+b1111111111100 "
+b1111111111100 %
+b111111111111 )
+b1111111111100 *
+#3000
+b0 '
+b0 !
+b0 (
+b1110000000000000 "
+b1110000000000000 %
+b0 )
+b1110000000000000 *
+#4000
+b111111111111 '
+b111111111111 !
+b10 $
+b10 &
+b11111111111100 "
+b11111111111100 %
+b111111111111 )
+b10 +
+b11111111111100 *
+#5000
+b111111111111 (
+b11 $
+b11 &
+b111111111111111 "
+b111111111111111 %
+b11 +
+b111111111111111 *
+#6000
+b0 '
+b0 !
+b0 (
+b1000000000000000 "
+b1000000000000000 %
+b0 )
+b1000000000000000 *
+#7000
