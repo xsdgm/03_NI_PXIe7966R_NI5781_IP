@@ -8,7 +8,8 @@
 module fog_core_ni7966r_ni5781_lv_adapter #(
     parameter [9:0]  DEFAULT_N       = 10'd170,
     parameter [13:0] DEFAULT_VDAREF  = 14'd13280,
-    parameter [7:0]  DEFAULT_FBK     = 8'd100
+    parameter [7:0]  DEFAULT_FBK     = 8'd100,
+    parameter [7:0]  DEFAULT_FBK2    = 8'd32
 )(
     input  wire        clk,
     input  wire        rst_n,
@@ -16,6 +17,7 @@ module fog_core_ni7966r_ni5781_lv_adapter #(
     input  wire [9:0]  cfg_N,
     input  wire [13:0] cfg_VDARef,
     input  wire [7:0]  cfg_FBK,
+    input  wire [7:0]  cfg_FBK2,
     input  wire [1:0]  ai_map_mode,
     input  wire [15:0] ai0_raw,
     input  wire [15:0] ai1_raw,
@@ -54,7 +56,8 @@ ni5781_ai_to_adin12 u_ai_map (
 fog_core_ni7966r #(
     .DEFAULT_N(DEFAULT_N),
     .DEFAULT_VDAREF(DEFAULT_VDAREF),
-    .DEFAULT_FBK(DEFAULT_FBK)
+    .DEFAULT_FBK(DEFAULT_FBK),
+    .DEFAULT_FBK2(DEFAULT_FBK2)
 ) u_core (
     .clk(clk),
     .rst_n(rst_n),
@@ -62,6 +65,7 @@ fog_core_ni7966r #(
     .cfg_N(cfg_N),
     .cfg_VDARef(cfg_VDARef),
     .cfg_FBK(cfg_FBK),
+    .cfg_FBK2(cfg_FBK2),
     .adin(adin_mapped),
     .ready(status_ready),
     .adclk(adclk_unused),

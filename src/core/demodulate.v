@@ -1,123 +1,128 @@
-///////////////////////////////
-//Error demodulate 误差解调模块
-///////////////////////////////
-
+// Error demodulation block.
 `include "DEF.v"
 
-module demodulate(rst,ena,clk,adin,counter,state,dRotateOut,dVrefOut,counterN,N,tauCounter,updown,random);
+module demodulate(
+    rst,
+    ena,
+    clk,
+    adin,
+    counter,
+    state,
+    dRotateOut,
+    dVrefOut,
+    counterN,
+    N,
+    tauCounter,
+    updown,
+    random,
+    cfg_sft_pd,
+    cfg_delayAD,
+    cfg_delay1,
+    cfg_delay2,
+    cfg_reserveN
+);
 input rst;
 input ena;
 input clk;
-input[11:0] adin;	//12位AD输入
-input[8:0] counter;
-input[1:0] state;
-output[31:0] dRotateOut;	//旋转误差解调输出
-output[31:0] dVrefOut;		//参考电压解调输出
+input [11:0] adin;
+input [8:0] counter;
+input [1:0] state;
+output [31:0] dRotateOut;
+output [31:0] dVrefOut;
+output random;
+input [9:0] counterN;
+input [9:0] N;
+input [11:0] tauCounter;
+input updown;
+input [11:0] cfg_sft_pd;
+input [7:0] cfg_delayAD;
+input [7:0] cfg_delay1;
+input [7:0] cfg_delay2;
+input [7:0] cfg_reserveN;
 
-//--------------------------------------------
-output random;		//AD最后一位作为随机因子
 reg random;
 reg randomPre;
-//--------------------------------------------
+reg [31:0] dRotateOut;
+reg [31:0] dVrefOut;
 
-reg[31:0] dRotateOut;
-reg[31:0] dVrefOut;
+wire [9:0] delayADw;
+wire [9:0] delay1w;
+wire [9:0] delay2w;
+wire [9:0] reserveNw;
+wire [9:0] delaySum;
+wire [9:0] halfN;
 
-///////////////////////
-input[9:0] counterN;
-input[9:0] N;
-input[11:0] tauCounter;
-input updown;
-///////////////////////
+assign delayADw = {2'b00, cfg_delayAD};
+assign delay1w = {2'b00, cfg_delay1};
+assign delay2w = {2'b00, cfg_delay2};
+assign reserveNw = {2'b00, cfg_reserveN};
+assign delaySum = delayADw + delay1w;
+assign halfN = {1'b0, N[9:1]};
 
-
-///////////////////////
-parameter delayAD=8;
-parameter delay1=36-4;	//大尖延时
-parameter delay2=22-4;	//小尖延时
-parameter reserveN=7;
-parameter delay=delayAD+delay1;	//N/2-delay-4
-///////////////////////
-
-
-//转动误差(1-3)-(2-4)
-always@ (posedge clk or negedge rst)
+always @ (posedge clk or negedge rst)
 begin
-	if(!rst)
-		dRotateOut<=32'b0;
-	else if(ena)
-	begin			
-		if(counter==1 && state[0]==1'b0)	//@__@
-			dRotateOut<=0;	
-		else if(tauCounter==12'd2 || tauCounter==12'd3)	//在位移的两段时间内
-				dRotateOut<=dRotateOut;					////////////////////
-		else
-		begin
-			if(counterN>delayAD+delay1 && counterN<=N[9:1]+delayAD-1)
-			begin
-				if(state[1]==0)
-					dRotateOut<=dRotateOut+adin;
-				else if(state[1]==1)
-					dRotateOut<=dRotateOut-adin;
-			end
-			else if(counter>delayAD+delay2 && counter<=N[9:1]-reserveN && state[0]==1)
-			begin
-				if(state[1]==0)
-					dRotateOut<=dRotateOut-adin;
-				else if(state[1]==1)
-					dRotateOut<=dRotateOut+adin;
-			end
-		end
-	end
+    if (!rst)
+        dRotateOut <= 32'b0;
+    else if (ena)
+    begin
+        if (counter == 1 && state[0] == 1'b0)
+            dRotateOut <= 0;
+        else if (tauCounter == 12'd2 || tauCounter == 12'd3)
+            dRotateOut <= dRotateOut;
+        else
+        begin
+            if (counterN > delaySum && counterN <= halfN + delayADw - 1'b1)
+            begin
+                if (state[1] == 0)
+                    dRotateOut <= dRotateOut + adin;
+                else if (state[1] == 1)
+                    dRotateOut <= dRotateOut - adin;
+            end
+            else if (counter > delayADw + delay2w && counter <= halfN - reserveNw && state[0] == 1)
+            begin
+                if (state[1] == 0)
+                    dRotateOut <= dRotateOut - adin;
+                else if (state[1] == 1)
+                    dRotateOut <= dRotateOut + adin;
+            end
+        end
+    end
 end
 
-
-//半波电压误差(1-2)+(3-4)
-always@ (posedge clk or negedge rst)
+always @ (posedge clk or negedge rst)
 begin
-	if(!rst)
-		dVrefOut<=32'b0;
-	else if(ena)
-	begin
-		if(counter==1 && state==2'b00)
-			dVrefOut<=0;
-		else if(tauCounter==12'd2 || tauCounter==12'd3)
-			dVrefOut<=dVrefOut;						////////////////////
-		else
-		begin
-			if(counterN>delayAD+delay1 && counterN<=N[9:1]+delayAD-1)
-				dVrefOut<=dVrefOut+adin;
-			else if(counter>delayAD+delay2 && counter<=N[9:1]-reserveN && state[0]==1)
-				dVrefOut<=dVrefOut-adin;
-
-		end
-	end
+    if (!rst)
+        dVrefOut <= 32'b0;
+    else if (ena)
+    begin
+        if (counter == 1 && state == 2'b00)
+            dVrefOut <= 0;
+        else if (tauCounter == 12'd2 || tauCounter == 12'd3)
+            dVrefOut <= dVrefOut;
+        else
+        begin
+            if (counterN > delaySum && counterN <= halfN + delayADw - 1'b1)
+                dVrefOut <= dVrefOut + adin;
+            else if (counter > delayADw + delay2w && counter <= halfN - reserveNw && state[0] == 1)
+                dVrefOut <= dVrefOut - adin;
+        end
+    end
 end
 
-
-
-//产生随机数因子
-always@ (posedge clk or negedge rst)
+always @ (posedge clk or negedge rst)
 begin
-	if(!rst)
-	begin
-		randomPre<=1'b0;
-		random<=1'b0;
-	end
-	else if(ena)
-	begin
-		if(counter>delay && counter<=N[9:1]-4)
-			randomPre<=randomPre+adin[0];
-		else if(counter==N[9:1]-3 && state==2'b11 && tauCounter==12'd`SFT_PD)
-		begin
-			random<=randomPre;	//定期缓存并清0，再重新异或
-		end
-	end
+    if (!rst)
+    begin
+        randomPre <= 1'b0;
+        random <= 1'b0;
+    end
+    else if (ena)
+    begin
+        if (counter > delaySum && counter <= halfN - 4)
+            randomPre <= randomPre + adin[0];
+        else if (counter == halfN - 3 && state == 2'b11 && tauCounter == cfg_sft_pd)
+            random <= randomPre;
+    end
 end
-
 
 endmodule
-
-    
-    
-
