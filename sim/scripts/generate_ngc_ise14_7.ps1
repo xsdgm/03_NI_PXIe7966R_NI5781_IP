@@ -4,31 +4,47 @@ $TopModule = "fog_core_ni7966r_ni5781_lv_adapter"
 $Part = "xc5vsx95tff1136-1"
 $KeepHierarchy = $false
 
-$projectRoot = Split-Path (Split-Path $PSScriptRoot -Parent) -Parent
+$scriptRoot = if ($PSScriptRoot) {
+    $PSScriptRoot
+} else {
+    Split-Path -Parent $MyInvocation.MyCommand.Path
+}
+
+$projectRoot = Split-Path (Split-Path $scriptRoot -Parent) -Parent
 $buildRoot = Join-Path $projectRoot "build\ise14_7"
 $buildDir = Join-Path $buildRoot $TopModule
 
-$xstCandidates = @(
-    "C:\NIFPGA\programs\Xilinx14_7\ISE\bin\nt64\xst.exe",
-    "C:\NIFPGA\programs\Xilinx14_7\ISE\bin\nt\xst.exe",
-    "C:\Xilinx\14.7\ISE_DS\ISE\bin\nt64\xst.exe",
-    "C:\Xilinx\14.7\ISE_DS\ISE\bin\nt\xst.exe"
+$toolCandidates = @(
+    @{
+        Xst = "C:\NIFPGA\programs\Xilinx14_7\ISE\bin\nt\xst.exe"
+        Settings = "C:\NIFPGA\programs\Xilinx14_7\settings32.bat"
+        Label = "NI FPGA ISE 14.7 32-bit"
+    },
+    @{
+        Xst = "C:\NIFPGA\programs\Xilinx14_7\ISE\bin\nt64\xst.exe"
+        Settings = "C:\NIFPGA\programs\Xilinx14_7\settings64.bat"
+        Label = "NI FPGA ISE 14.7 64-bit"
+    },
+    @{
+        Xst = "C:\Xilinx\14.7\ISE_DS\ISE\bin\nt\xst.exe"
+        Settings = "C:\Xilinx\14.7\ISE_DS\settings32.bat"
+        Label = "Standalone ISE 14.7 32-bit"
+    },
+    @{
+        Xst = "C:\Xilinx\14.7\ISE_DS\ISE\bin\nt64\xst.exe"
+        Settings = "C:\Xilinx\14.7\ISE_DS\settings64.bat"
+        Label = "Standalone ISE 14.7 64-bit"
+    }
 )
 
-$xstExe = $xstCandidates | Where-Object { Test-Path $_ } | Select-Object -First 1
-if (-not $xstExe) {
-    throw "Cannot find xst.exe for Xilinx ISE 14.7."
+$tool = $toolCandidates | Where-Object { (Test-Path $_.Xst) -and (Test-Path $_.Settings) } | Select-Object -First 1
+if (-not $tool) {
+    throw "Cannot find a matching xst.exe/settings*.bat pair for Xilinx ISE 14.7."
 }
 
-$settingsCandidates = @(
-    "C:\NIFPGA\programs\Xilinx14_7\settings64.bat",
-    "C:\Xilinx\14.7\ISE_DS\settings64.bat"
-)
-
-$settingsBat = $settingsCandidates | Where-Object { Test-Path $_ } | Select-Object -First 1
-if (-not $settingsBat) {
-    throw "Cannot find settings64.bat for Xilinx ISE 14.7."
-}
+$xstExe = $tool.Xst
+$settingsBat = $tool.Settings
+$toolLabel = $tool.Label
 
 if (-not (Test-Path $buildDir)) {
     New-Item -ItemType Directory -Path $buildDir -Force | Out-Null
@@ -57,6 +73,11 @@ $xstTmpDir = Join-Path $buildDir "xst"
 $runBat = Join-Path $buildDir "run_xst.bat"
 $keepValue = if ($KeepHierarchy) { "Yes" } else { "No" }
 
+if (-not (Test-Path $xstTmpDir)) {
+    New-Item -ItemType Directory -Path $xstTmpDir -Force | Out-Null
+}
+attrib -R "$xstTmpDir" /S /D 2>$null
+
 $prjLines = foreach ($file in $sourceFiles) {
     "verilog work `"$((Join-Path $projectRoot $file))`""
 }
@@ -82,6 +103,7 @@ Set-Content -LiteralPath $xstFile -Value $xstLines -Encoding ASCII
 
 Write-Host "Using XST:" $xstExe
 Write-Host "Using settings:" $settingsBat
+Write-Host "Toolchain:" $toolLabel
 Write-Host "Top module:" $TopModule
 Write-Host "Target part:" $Part
 Write-Host "Output dir:" $buildDir
