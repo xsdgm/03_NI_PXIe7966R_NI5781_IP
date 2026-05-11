@@ -22,6 +22,7 @@ wire        sdaclk;
 wire        sdacs;
 wire        sp;
 wire        sn;
+wire signed [15:0] sp_sn_value;
 wire [1:0]  state_dbg;
 wire [8:0]  counter_dbg;
 wire [9:0]  counterN_dbg;
@@ -76,6 +77,7 @@ fog_core_ni7966r dut (
     .sdacs(sdacs),
     .sp(sp),
     .sn(sn),
+    .sp_sn_value(sp_sn_value),
     .state_dbg(state_dbg),
     .counter_dbg(counter_dbg),
     .counterN_dbg(counterN_dbg),

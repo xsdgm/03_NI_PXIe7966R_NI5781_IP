@@ -8,16 +8,13 @@ entity fog_core_ni7966r_ni5781_lv_adapter is
         rst_n        : in  std_logic;
         cfg_apply    : in  std_logic;
         cfg_N        : in  std_logic_vector(9 downto 0);
-        cfg_VDARef   : in  std_logic_vector(13 downto 0);
+        cfg_V2Pai_mV : in  std_logic_vector(15 downto 0);
         cfg_FBK      : in  std_logic_vector(7 downto 0);
         cfg_FBK2     : in  std_logic_vector(7 downto 0);
         ai_map_mode  : in  std_logic_vector(1 downto 0);
         ai0_raw      : in  std_logic_vector(15 downto 0);
-        ai1_raw      : in  std_logic_vector(15 downto 0);
         ao0_raw      : out std_logic_vector(15 downto 0);
-        ao1_raw      : out std_logic_vector(15 downto 0);
-        dio_sp       : out std_logic;
-        dio_sn       : out std_logic;
+        sp_sn_value  : out std_logic_vector(15 downto 0);
         status_ready : out std_logic;
         state_dbg    : out std_logic_vector(1 downto 0);
         adin_dbg     : out std_logic_vector(11 downto 0)
@@ -26,21 +23,124 @@ end entity;
 
 architecture behavioral of fog_core_ni7966r_ni5781_lv_adapter is
     signal state : unsigned(1 downto 0) := (others => '0');
-begin
-    process(clk, rst_n)
+    signal counter : unsigned(9 downto 0) := (others => '0');
+    signal cfg_n_safe : unsigned(9 downto 0) := to_unsigned(170, 10);
+    signal adin_mapped : unsigned(11 downto 0) := (others => '0');
+    signal vref_word : unsigned(15 downto 0) := (others => '0');
+    signal mod_word : unsigned(15 downto 0) := (others => '0');
+
+    function clamp12(value : integer) return unsigned is
     begin
-        if rst_n = '0' then
-            state <= (others => '0');
-        elsif rising_edge(clk) then
-            state <= state + 1;
+        if value < 0 then
+            return to_unsigned(0, 12);
+        elsif value > 4095 then
+            return to_unsigned(4095, 12);
+        else
+            return to_unsigned(value, 12);
+        end if;
+    end function;
+
+    function clamp16(value : integer) return std_logic_vector is
+    begin
+        if value < 0 then
+            return std_logic_vector(to_unsigned(0, 16));
+        elsif value > 65535 then
+            return std_logic_vector(to_unsigned(65535, 16));
+        else
+            return std_logic_vector(to_unsigned(value, 16));
+        end if;
+    end function;
+begin
+    process(cfg_N)
+        variable n_tmp : integer;
+    begin
+        n_tmp := to_integer(unsigned(cfg_N));
+        if n_tmp < 68 then
+            cfg_n_safe <= to_unsigned(68, 10);
+        elsif n_tmp > 1022 then
+            cfg_n_safe <= to_unsigned(1022, 10);
+        else
+            cfg_n_safe <= unsigned(cfg_N);
         end if;
     end process;
 
-    ao0_raw      <= ai0_raw;
-    ao1_raw      <= "00" & cfg_VDARef;
-    dio_sp       <= state(0);
-    dio_sn       <= not state(0);
+    process(clk, rst_n)
+        variable half_count : integer;
+        variable terminal_count : integer;
+    begin
+        if rst_n = '0' then
+            state <= (others => '0');
+            counter <= (others => '0');
+        elsif rising_edge(clk) then
+            half_count := to_integer(cfg_n_safe) / 2;
+            if state(0) = '0' then
+                terminal_count := half_count + (to_integer(cfg_n_safe) mod 2);
+            else
+                terminal_count := half_count;
+            end if;
+
+            if to_integer(counter) >= terminal_count then
+                counter <= to_unsigned(1, 10);
+                state <= state + 1;
+            else
+                counter <= counter + 1;
+            end if;
+        end if;
+    end process;
+
+    process(ai0_raw, ai_map_mode)
+        variable mapped_tmp : integer;
+    begin
+        case ai_map_mode is
+            when "00" =>
+                adin_mapped <= unsigned(ai0_raw(11 downto 0));
+            when "01" =>
+                mapped_tmp := to_integer(shift_right(signed(ai0_raw), 2)) + 2048;
+                adin_mapped <= clamp12(mapped_tmp);
+            when "10" =>
+                adin_mapped <= unsigned(ai0_raw(13 downto 2));
+            when others =>
+                mapped_tmp := to_integer(shift_right(signed(ai0_raw), 4)) + 2048;
+                adin_mapped <= clamp12(mapped_tmp);
+        end case;
+    end process;
+
+    process(cfg_V2Pai_mV)
+        variable vref_tmp : integer;
+        variable v2pai_limited : integer;
+    begin
+        if to_integer(unsigned(cfg_V2Pai_mV)) > 2500 then
+            v2pai_limited := 2500;
+        else
+            v2pai_limited := to_integer(unsigned(cfg_V2Pai_mV));
+        end if;
+        vref_tmp := (v2pai_limited * 26842 + 2048) / 4096;
+        if vref_tmp > 16383 then
+            vref_word <= to_unsigned(65532, 16);
+        else
+            vref_word <= to_unsigned(vref_tmp * 4, 16);
+        end if;
+    end process;
+
+    process(state)
+    begin
+        case state is
+            when "00" =>
+                mod_word <= to_unsigned(23254, 16);
+            when "01" =>
+                mod_word <= to_unsigned(2114, 16);
+            when "10" =>
+                mod_word <= to_unsigned(0, 16);
+            when others =>
+                mod_word <= to_unsigned(21140, 16);
+        end case;
+    end process;
+
+    ao0_raw      <= clamp16((to_integer(mod_word) * to_integer(vref_word)) / (13280 * 4));
+    sp_sn_value  <= std_logic_vector(to_signed(1, 16)) when state = "01" else
+                    std_logic_vector(to_signed(-1, 16)) when state = "10" else
+                    std_logic_vector(to_signed(0, 16));
     status_ready <= rst_n;
     state_dbg    <= std_logic_vector(state);
-    adin_dbg     <= ai0_raw(15 downto 4) when ai_map_mode = "00" else ai0_raw(11 downto 0);
+    adin_dbg     <= std_logic_vector(adin_mapped);
 end architecture;

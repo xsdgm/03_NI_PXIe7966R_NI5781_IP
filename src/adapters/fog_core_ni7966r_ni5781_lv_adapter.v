@@ -2,12 +2,15 @@
 //
 // This wrapper follows the current "AI -> IP -> AO" wiring style:
 // - AI0 feeds the demodulation sample path
-// - AO0 outputs the main modulation word
-// - AO1 outputs the second-loop Vref compensation word
-// - SP/SN remain available as digital pulse outputs
+// - AO0 outputs the main modulation word, with the original board's VDAREF
+//   reference-DAC scaling emulated in digital logic
+// - cfg_V2Pai_mV is the half-wave voltage in millivolts, e.g. 1800 for 1.8 V
+// - cfg_N is accepted up to 1022 in LabVIEW mode; values outside 68..1022
+//   are clamped before entering the timing core
+// - sp_sn_value exposes the gyro pulse difference directly
 module fog_core_ni7966r_ni5781_lv_adapter #(
     parameter [9:0]  DEFAULT_N       = 10'd170,
-    parameter [13:0] DEFAULT_VDAREF  = 14'd13280,
+    parameter [15:0] DEFAULT_V2PAI_MV = 16'd1800,
     parameter [7:0]  DEFAULT_FBK     = 8'd100,
     parameter [7:0]  DEFAULT_FBK2    = 8'd32
 )(
@@ -15,16 +18,13 @@ module fog_core_ni7966r_ni5781_lv_adapter #(
     input  wire        rst_n,
     input  wire        cfg_apply,
     input  wire [9:0]  cfg_N,
-    input  wire [13:0] cfg_VDARef,
+    input  wire [15:0] cfg_V2Pai_mV,
     input  wire [7:0]  cfg_FBK,
     input  wire [7:0]  cfg_FBK2,
     input  wire [1:0]  ai_map_mode,
     input  wire [15:0] ai0_raw,
-    input  wire [15:0] ai1_raw,
     output wire [15:0] ao0_raw,
-    output wire [15:0] ao1_raw,
-    output wire        dio_sp,
-    output wire        dio_sn,
+    output wire signed [15:0] sp_sn_value,
     output wire        status_ready,
     output wire [1:0]  state_dbg,
     output wire [11:0] adin_dbg
@@ -35,17 +35,55 @@ wire daclk_unused;
 wire sdaout_unused;
 wire sdaclk_unused;
 wire sdacs_unused;
+wire sp_unused;
+wire sn_unused;
 wire [8:0] counter_dbg_unused;
 wire [9:0] counterN_dbg_unused;
 wire [11:0] tau_dbg_unused;
 wire [31:0] intsout_dbg_unused;
 wire [31:0] drotate_dbg_unused;
 wire [31:0] dvref_dbg_unused;
-wire unused_ai1;
 wire [11:0] adin_mapped;
+wire [15:0] daout_unscaled;
+wire [15:0] vref_word;
+wire [48:0] ao0_scaled_product;
+wire [16:0] ao0_scaled_word;
+wire [15:0] cfg_v2pai_limited;
+wire [31:0] cfg_vdaref_scaled;
+wire [13:0] cfg_vdaref_code;
+wire [9:0] cfg_n_safe;
+reg [31:0] ao0_vref_product_r;
 
-assign unused_ai1 = ^ai1_raw;
+localparam [9:0] DEFAULT_N_SAFE =
+    (DEFAULT_N < 10'd68) ? 10'd68 :
+    (DEFAULT_N > 10'd1022) ? 10'd1022 : DEFAULT_N;
+localparam [15:0] DEFAULT_V2PAI_LIMITED =
+    (DEFAULT_V2PAI_MV > 16'd2500) ? 16'd2500 : DEFAULT_V2PAI_MV;
+localparam [31:0] DEFAULT_VDAREF_SCALED =
+    (DEFAULT_V2PAI_LIMITED * 32'd26842) + 32'd2048;
+localparam [31:0] DEFAULT_VDAREF_SHIFTED = DEFAULT_VDAREF_SCALED >> 12;
+localparam [13:0] DEFAULT_VDAREF_CODE =
+    (DEFAULT_VDAREF_SHIFTED > 32'd16383) ? 14'h3fff : DEFAULT_VDAREF_SHIFTED;
+localparam [15:0] DEFAULT_VREF_WORD = {DEFAULT_VDAREF_CODE, 2'b00};
+localparam [15:0] VREF_RECIP_Q31 =
+    (((49'd1 << 31) + (DEFAULT_VREF_WORD >> 1)) / DEFAULT_VREF_WORD);
+
 assign adin_dbg   = adin_mapped;
+assign cfg_n_safe = (cfg_N < 10'd68) ? 10'd68 :
+                    (cfg_N > 10'd1022) ? 10'd1022 : cfg_N;
+assign cfg_v2pai_limited = (cfg_V2Pai_mV > 16'd2500) ? 16'd2500 : cfg_V2Pai_mV;
+assign cfg_vdaref_scaled = (cfg_v2pai_limited * 32'd26842) + 32'd2048;
+assign cfg_vdaref_code = (cfg_vdaref_scaled[31:12] > 20'd16383) ? 14'h3fff : cfg_vdaref_scaled[25:12];
+assign ao0_scaled_product = ({1'b0, ao0_vref_product_r} * VREF_RECIP_Q31) + 49'd1073741824;
+assign ao0_scaled_word = ao0_scaled_product[47:31];
+assign ao0_raw = (ao0_scaled_product[48] || ao0_scaled_word[16]) ? 16'hffff : ao0_scaled_word[15:0];
+
+always @(posedge clk or negedge rst_n) begin
+    if (!rst_n)
+        ao0_vref_product_r <= 32'd0;
+    else
+        ao0_vref_product_r <= daout_unscaled * vref_word;
+end
 
 ni5781_ai_to_adin12 u_ai_map (
     .ai_raw(ai0_raw),
@@ -54,29 +92,30 @@ ni5781_ai_to_adin12 u_ai_map (
 );
 
 fog_core_ni7966r #(
-    .DEFAULT_N(DEFAULT_N),
-    .DEFAULT_VDAREF(DEFAULT_VDAREF),
+    .DEFAULT_N(DEFAULT_N_SAFE),
+    .DEFAULT_VDAREF(DEFAULT_VDAREF_CODE),
     .DEFAULT_FBK(DEFAULT_FBK),
     .DEFAULT_FBK2(DEFAULT_FBK2)
 ) u_core (
     .clk(clk),
     .rst_n(rst_n),
     .cfg_apply(cfg_apply),
-    .cfg_N(cfg_N),
-    .cfg_VDARef(cfg_VDARef),
+    .cfg_N(cfg_n_safe),
+    .cfg_VDARef(cfg_vdaref_code),
     .cfg_FBK(cfg_FBK),
     .cfg_FBK2(cfg_FBK2),
     .adin(adin_mapped),
     .ready(status_ready),
     .adclk(adclk_unused),
     .daclk(daclk_unused),
-    .daout(ao0_raw),
-    .vref_word(ao1_raw),
+    .daout(daout_unscaled),
+    .vref_word(vref_word),
     .sdaout(sdaout_unused),
     .sdaclk(sdaclk_unused),
     .sdacs(sdacs_unused),
-    .sp(dio_sp),
-    .sn(dio_sn),
+    .sp(sp_unused),
+    .sn(sn_unused),
+    .sp_sn_value(sp_sn_value),
     .state_dbg(state_dbg),
     .counter_dbg(counter_dbg_unused),
     .counterN_dbg(counterN_dbg_unused),

@@ -7,7 +7,9 @@ module fog_core_ni7966r #(
     parameter [9:0]  DEFAULT_N       = 10'd170,
     parameter [13:0] DEFAULT_VDAREF  = 14'd13280,
     parameter [7:0]  DEFAULT_FBK     = 8'd100,
-    parameter [7:0]  DEFAULT_FBK2    = 8'd32
+    parameter [7:0]  DEFAULT_FBK2    = 8'd32,
+    parameter [31:0] DEFAULT_PULSE_K = 32'd2560000,
+    parameter [3:0]  DEFAULT_PULSE_WIDTH = 4'd2
 )(
     input  wire        clk,
     input  wire        rst_n,
@@ -27,6 +29,7 @@ module fog_core_ni7966r #(
     output wire        sdacs,
     output wire        sp,
     output wire        sn,
+    output wire signed [15:0] sp_sn_value,
     output wire [1:0]  state_dbg,
     output wire [8:0]  counter_dbg,
     output wire [9:0]  counterN_dbg,
@@ -52,13 +55,13 @@ wire [7:0] FBK2;
 wire [31:0] dRotateOut;
 wire [31:0] dVrefOut;
 wire [31:0] dRotateOutFBK;
-wire [31:0] dVrefOutFBK;
 wire [31:0] intsout;
 wire [15:0] pintout;
 wire sdaSend;
 wire [11:0] tauCounter;
 wire updown;
 wire random;
+wire unused_fbk2;
 
 reg [9:0]  cfg_n_reg;
 reg [13:0] cfg_vdaref_reg;
@@ -67,6 +70,10 @@ reg [7:0]  cfg_fbk2_reg;
 reg [1:0]  cfg_reset_hold;
 
 localparam [11:0] CFG_SFT_PD_DEFAULT = `SFT_PD;
+localparam [7:0]  CFG_DELAY_AD_DEFAULT = 8'd8;
+localparam [7:0]  CFG_DELAY1_DEFAULT   = 8'd32;
+localparam [7:0]  CFG_DELAY2_DEFAULT   = 8'd18;
+localparam [7:0]  CFG_RESERVEN_DEFAULT = 8'd7;
 localparam [15:0] CFG_PI_DEFAULT     = 16'd21140;
 localparam [15:0] CFG_PIB_DEFAULT    = 16'd23254;
 localparam [15:0] CFG_PIBPPI_DEFAULT = 16'd2114;
@@ -76,9 +83,11 @@ assign N           = cfg_n_reg;
 assign VDARef      = cfg_vdaref_reg;
 assign FBK         = cfg_fbk_reg;
 assign FBK2        = cfg_fbk2_reg;
+assign unused_fbk2 = ^FBK2;
 assign vref_word   = pintout;
 assign ready       = sys_rst;
 assign state_dbg   = state;
+assign sp_sn_value = $signed({15'd0, sp}) - $signed({15'd0, sn});
 assign counter_dbg = counter;
 assign counterN_dbg = counterN;
 assign tau_dbg     = tauCounter;
@@ -142,7 +151,12 @@ demodulate dmt(
     .N(N),
     .tauCounter(tauCounter),
     .updown(updown),
-    .random(random)
+    .random(random),
+    .cfg_sft_pd(CFG_SFT_PD_DEFAULT),
+    .cfg_delayAD(CFG_DELAY_AD_DEFAULT),
+    .cfg_delay1(CFG_DELAY1_DEFAULT),
+    .cfg_delay2(CFG_DELAY2_DEFAULT),
+    .cfg_reserveN(CFG_RESERVEN_DEFAULT)
 );
 
 dRtMultFBK dmk(
@@ -152,15 +166,6 @@ dRtMultFBK dmk(
     .FBK(FBK),
     .dRotateOut24(dRotateOut[23:0]),
     .dRotateOutFBK(dRotateOutFBK)
-);
-
-dRtMultFBK dmk_vref(
-    .rst(sys_rst),
-    .intena0(intena0),
-    .clk(clk),
-    .FBK(FBK2),
-    .dRotateOut24(dVrefOut[23:0]),
-    .dRotateOutFBK(dVrefOutFBK)
 );
 
 integrator itg(
@@ -194,7 +199,7 @@ pidemint pint(
     .clk(clk),
     .counter(counter),
     .state(state),
-    .dVrefOut({dVrefOutFBK[28:0], 3'b0}),
+    .dVrefOut({dVrefOut[28:0], 3'b0}),
     .VDARef(VDARef),
     .pintout(pintout),
     .sdaSend(sdaSend),
@@ -218,6 +223,9 @@ angleoutputWithComp agowc(
     .clk(clk),
     .intsout(intsout),
     .counterN(counterN),
+    .N(N),
+    .pulse_k(DEFAULT_PULSE_K),
+    .pulse_width(DEFAULT_PULSE_WIDTH),
     .sp(sp),
     .sn(sn)
 );
