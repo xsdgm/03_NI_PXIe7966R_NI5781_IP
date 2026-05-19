@@ -68,7 +68,7 @@ function [9:0] expected_n_safe;
         else if (n_in > 10'd1022)
             expected_n_safe = 10'd1022;
         else
-            expected_n_safe = n_in;
+            expected_n_safe = {n_in[9:1], 1'b0};
     end
 endfunction
 
@@ -209,6 +209,7 @@ initial begin
 
     run_case(10'd50,   16'd1800, "N below min");
     run_case(10'd170,  16'd1800, "nominal");
+    run_case(10'd171,  16'd1800, "odd N coerced even");
     run_case(10'd400,  16'd500,  "amp input limit");
     run_case(10'd1022, 16'd2500, "high safe limits");
     run_case(10'd1023, 16'd3000, "clamped high");

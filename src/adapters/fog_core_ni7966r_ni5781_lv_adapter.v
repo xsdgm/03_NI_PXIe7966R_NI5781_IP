@@ -6,7 +6,7 @@
 // - AO1 exposes the raw ladhpi/daout phase-step word for observation
 // - cfg_V2Pai_mV is the half-wave voltage in millivolts, e.g. 1800 for 1.8 V
 // - cfg_N is accepted up to 1022 in LabVIEW mode; values outside 68..1022
-//   are clamped before entering the timing core
+//   are clamped, then forced even, before entering the timing core
 // - sp_sn_value exposes the gyro pulse difference directly
 module fog_core_ni7966r_ni5781_lv_adapter #(
     parameter [9:0]  DEFAULT_N       = 10'd170,
@@ -50,6 +50,7 @@ wire [15:0] vref_word;
 wire [15:0] cfg_v2pai_limited;
 wire [31:0] cfg_vdaref_scaled;
 wire [13:0] cfg_vdaref_code;
+wire [9:0] cfg_n_clamped;
 wire [9:0] cfg_n_safe;
 reg        scale_busy;
 reg [5:0]  scale_phase;
@@ -60,8 +61,8 @@ reg [48:0] scale_product2;
 reg [15:0] ao0_raw_r;
 
 localparam [9:0] DEFAULT_N_SAFE =
-    (DEFAULT_N < 10'd68) ? 10'd68 :
-    (DEFAULT_N > 10'd1022) ? 10'd1022 : DEFAULT_N;
+    ((DEFAULT_N < 10'd68) ? 10'd68 :
+     (DEFAULT_N > 10'd1022) ? 10'd1022 : DEFAULT_N) & 10'h3fe;
 localparam [15:0] DEFAULT_V2PAI_LIMITED =
     (DEFAULT_V2PAI_MV > 16'd2500) ? 16'd2500 : DEFAULT_V2PAI_MV;
 localparam [31:0] DEFAULT_VDAREF_SCALED =
@@ -74,8 +75,9 @@ localparam [15:0] VREF_RECIP_Q31 =
     (((49'd1 << 31) + (DEFAULT_VREF_WORD >> 1)) / DEFAULT_VREF_WORD);
 
 assign adin_dbg   = adin_mapped;
-assign cfg_n_safe = (cfg_N < 10'd68) ? 10'd68 :
-                    (cfg_N > 10'd1022) ? 10'd1022 : cfg_N;
+assign cfg_n_clamped = (cfg_N < 10'd68) ? 10'd68 :
+                       (cfg_N > 10'd1022) ? 10'd1022 : cfg_N;
+assign cfg_n_safe = {cfg_n_clamped[9:1], 1'b0};
 assign cfg_v2pai_limited = (cfg_V2Pai_mV > 16'd2500) ? 16'd2500 : cfg_V2Pai_mV;
 assign cfg_vdaref_scaled = (cfg_v2pai_limited * 32'd26842) + 32'd2048;
 assign cfg_vdaref_code = (cfg_vdaref_scaled[31:12] > 20'd16383) ? 14'h3fff : cfg_vdaref_scaled[25:12];

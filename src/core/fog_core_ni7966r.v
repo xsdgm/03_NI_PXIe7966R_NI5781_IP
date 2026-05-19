@@ -71,6 +71,9 @@ reg [13:0] cfg_vdaref_reg;
 reg [7:0]  cfg_fbk_reg;
 reg [7:0]  cfg_fbk2_reg;
 reg [1:0]  cfg_reset_hold;
+reg        cfg_apply_d;
+
+wire cfg_apply_pulse;
 
 localparam [11:0] CFG_SFT_PD_DEFAULT = `SFT_PD;
 localparam [7:0]  CFG_DELAY_AD_DEFAULT = 8'd8;
@@ -99,6 +102,7 @@ assign dvref_dbg   = dVrefOut;
 assign first_loop_drive = {dRotateOutFBK[28:0], 3'b0};
 assign second_loop_drive = {dVrefOutFBK[28:0], 3'b0};
 assign closed_loop_drive = first_loop_drive + second_loop_drive;
+assign cfg_apply_pulse = cfg_apply & ~cfg_apply_d;
 
 always @(posedge clk or negedge rst_n) begin
     if (!rst_n) begin
@@ -107,8 +111,11 @@ always @(posedge clk or negedge rst_n) begin
         cfg_fbk_reg    <= DEFAULT_FBK;
         cfg_fbk2_reg   <= DEFAULT_FBK2;
         cfg_reset_hold <= 2'b00;
+        cfg_apply_d    <= 1'b0;
     end else begin
-        if (cfg_apply) begin
+        cfg_apply_d <= cfg_apply;
+
+        if (cfg_apply_pulse) begin
             cfg_n_reg      <= cfg_N;
             cfg_vdaref_reg <= cfg_VDARef;
             cfg_fbk_reg    <= cfg_FBK;

@@ -40,7 +40,7 @@ always@ (posedge clk or negedge rst)
 begin
     if(!rst)
     begin
-       counter<=0;
+       counter<=9'b1;
        state<=2'b00;
     end
     else if(ena)

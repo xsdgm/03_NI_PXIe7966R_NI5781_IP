@@ -39,6 +39,9 @@ integer state_seen_mask;
 integer ao0_change_count;
 integer state_count [0:3];
 integer state_sum [0:3];
+integer state_period_count [0:3];
+integer state_period_min [0:3];
+integer state_period_max [0:3];
 integer seg_count [0:2];
 integer seg_sum [0:2];
 integer log_fd;
@@ -52,6 +55,9 @@ integer avg_state2;
 integer avg_state3;
 integer avg_seg1;
 integer avg_seg2;
+integer period_expected;
+integer state_period_len;
+integer state_period_prev;
 reg [15:0] daout_prev;
 
 ni5781_ai_to_adin12 u_map (
@@ -124,9 +130,26 @@ always @(posedge clk) begin
         state_seen_mask <= 0;
         ao0_change_count <= 0;
         daout_prev <= 16'h0000;
+        state_period_len <= 0;
+        state_period_prev <= 0;
     end else begin
         cycles_after_ready <= cycles_after_ready + 1;
         state_seen_mask[state_dbg] <= 1'b1;
+
+        if (cycles_after_ready == 0) begin
+            state_period_prev <= state_dbg;
+            state_period_len <= 1;
+        end else if (state_dbg != state_period_prev) begin
+            state_period_count[state_period_prev] <= state_period_count[state_period_prev] + 1;
+            if (state_period_len < state_period_min[state_period_prev])
+                state_period_min[state_period_prev] <= state_period_len;
+            if (state_period_len > state_period_max[state_period_prev])
+                state_period_max[state_period_prev] <= state_period_len;
+            state_period_prev <= state_dbg;
+            state_period_len <= 1;
+        end else begin
+            state_period_len <= state_period_len + 1;
+        end
 
         if (cycles_after_ready < 2000)
             gyro_segment <= 0;
@@ -197,10 +220,16 @@ initial begin
     avg_state3 = 0;
     avg_seg1 = 0;
     avg_seg2 = 0;
+    period_expected = 85;
+    state_period_len = 0;
+    state_period_prev = 0;
 
     for (idx = 0; idx < 4; idx = idx + 1) begin
         state_count[idx] = 0;
         state_sum[idx] = 0;
+        state_period_count[idx] = 0;
+        state_period_min[idx] = 32'h7fffffff;
+        state_period_max[idx] = 0;
     end
 
     for (idx = 0; idx < 3; idx = idx + 1) begin
@@ -243,6 +272,15 @@ initial begin
     for (idx = 0; idx < 4; idx = idx + 1) begin
         if (state_count[idx] == 0) begin
             $display("TB FAIL gyro: no modulation samples captured for state=%0d", idx);
+            errors = errors + 1;
+        end
+
+        if (state_period_count[idx] == 0 ||
+            state_period_min[idx] != period_expected ||
+            state_period_max[idx] != period_expected) begin
+            $display("TB FAIL gyro: state=%0d period mismatch count=%0d min=%0d max=%0d expected=%0d",
+                     idx, state_period_count[idx], state_period_min[idx],
+                     state_period_max[idx], period_expected);
             errors = errors + 1;
         end
     end

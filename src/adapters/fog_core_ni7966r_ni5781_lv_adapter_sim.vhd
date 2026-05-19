@@ -39,6 +39,7 @@ architecture behavioral of fog_core_ni7966r_ni5781_lv_adapter is
     signal scale_product2 : unsigned(48 downto 0) := (others => '0');
     signal ao0_raw_r : std_logic_vector(15 downto 0) := (others => '0');
     signal ao1_raw_r : std_logic_vector(15 downto 0) := (others => '0');
+    signal cfg_apply_d : std_logic := '0';
 
     constant AO0_RECIP_Q31 : unsigned(15 downto 0) := to_unsigned(40427, 16);
     constant AO0_ROUND_Q31 : unsigned(48 downto 0) := to_unsigned(1073741824, 49);
@@ -54,20 +55,20 @@ architecture behavioral of fog_core_ni7966r_ni5781_lv_adapter is
         end if;
     end function;
 
-begin
-    process(cfg_N)
-        variable n_tmp : integer;
+    function sanitize_n(value : integer) return unsigned is
+        variable clamped : integer;
     begin
-        n_tmp := to_integer(unsigned(cfg_N));
-        if n_tmp < 68 then
-            cfg_n_safe <= to_unsigned(68, 10);
-        elsif n_tmp > 1022 then
-            cfg_n_safe <= to_unsigned(1022, 10);
+        if value < 68 then
+            clamped := 68;
+        elsif value > 1022 then
+            clamped := 1022;
         else
-            cfg_n_safe <= unsigned(cfg_N);
+            clamped := value;
         end if;
-    end process;
+        return to_unsigned(clamped - (clamped mod 2), 10);
+    end function;
 
+begin
     process(clk, rst_n)
         variable half_count : integer;
         variable terminal_count : integer;
@@ -76,25 +77,36 @@ begin
     begin
         if rst_n = '0' then
             state <= (others => '0');
-            counter <= (others => '0');
+            counter <= to_unsigned(1, 10);
+            cfg_n_safe <= to_unsigned(170, 10);
             loop_accum <= (others => '0');
+            cfg_apply_d <= '0';
         elsif rising_edge(clk) then
-            half_count := to_integer(cfg_n_safe) / 2;
-            if state(0) = '0' then
-                terminal_count := half_count + (to_integer(cfg_n_safe) mod 2);
-            else
-                terminal_count := half_count;
-            end if;
+            cfg_apply_d <= cfg_apply;
 
-            if to_integer(counter) >= terminal_count then
+            if cfg_apply = '1' and cfg_apply_d = '0' then
+                cfg_n_safe <= sanitize_n(to_integer(unsigned(cfg_N)));
+                state <= (others => '0');
                 counter <= to_unsigned(1, 10);
-                state <= state + 1;
-
-                ai_error := to_integer(adin_mapped) - 2048;
-                drive := ai_error * (to_integer(unsigned(cfg_FBK)) + to_integer(unsigned(cfg_FBK2)));
-                loop_accum <= loop_accum + to_signed(drive, 32);
+                loop_accum <= (others => '0');
             else
-                counter <= counter + 1;
+                half_count := to_integer(cfg_n_safe) / 2;
+                if state(0) = '0' then
+                    terminal_count := half_count + (to_integer(cfg_n_safe) mod 2);
+                else
+                    terminal_count := half_count;
+                end if;
+
+                if to_integer(counter) >= terminal_count then
+                    counter <= to_unsigned(1, 10);
+                    state <= state + 1;
+
+                    ai_error := to_integer(adin_mapped) - 2048;
+                    drive := ai_error * (to_integer(unsigned(cfg_FBK)) + to_integer(unsigned(cfg_FBK2)));
+                    loop_accum <= loop_accum + to_signed(drive, 32);
+                else
+                    counter <= counter + 1;
+                end if;
             end if;
         end if;
     end process;
