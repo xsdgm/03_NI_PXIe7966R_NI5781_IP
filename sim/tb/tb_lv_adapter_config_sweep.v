@@ -13,6 +13,7 @@ reg  [1:0]  ai_map_mode;
 reg  [15:0] ai0_raw;
 
 wire [15:0] ao0_raw;
+wire [15:0] ao1_raw;
 wire signed [15:0] sp_sn_value;
 wire        status_ready;
 wire [1:0]  state_dbg;
@@ -24,7 +25,9 @@ integer changes;
 integer state_mask;
 integer min_ao;
 integer max_ao;
+integer raw_changes;
 reg [15:0] prev_ao;
+reg [15:0] prev_raw_ao;
 
 fog_core_ni7966r_ni5781_lv_adapter dut (
     .clk(clk),
@@ -37,6 +40,7 @@ fog_core_ni7966r_ni5781_lv_adapter dut (
     .ai_map_mode(ai_map_mode),
     .ai0_raw(ai0_raw),
     .ao0_raw(ao0_raw),
+    .ao1_raw(ao1_raw),
     .sp_sn_value(sp_sn_value),
     .status_ready(status_ready),
     .state_dbg(state_dbg),
@@ -96,7 +100,9 @@ task run_case;
         state_mask = 0;
         min_ao = 65535;
         max_ao = 0;
+        raw_changes = 0;
         prev_ao = ao0_raw;
+        prev_raw_ao = ao1_raw;
 
         for (cycle = 0; cycle < run_cycles; cycle = cycle + 1) begin
             @(posedge clk);
@@ -104,6 +110,17 @@ task run_case;
 
             if (^ao0_raw === 1'bx) begin
                 $display("TB FAIL sweep %0s: ao0_raw has X at cycle=%0d", label, cycle);
+                errors = errors + 1;
+            end
+
+            if (^ao1_raw === 1'bx) begin
+                $display("TB FAIL sweep %0s: ao1_raw has X at cycle=%0d", label, cycle);
+                errors = errors + 1;
+            end
+
+            if (ao1_raw !== dut.daout_unscaled) begin
+                $display("TB FAIL sweep %0s: ao1_raw=0x%04h expected raw daout=0x%04h",
+                         label, ao1_raw, dut.daout_unscaled);
                 errors = errors + 1;
             end
 
@@ -120,6 +137,11 @@ task run_case;
             if (ao0_raw !== prev_ao) begin
                 changes = changes + 1;
                 prev_ao = ao0_raw;
+            end
+
+            if (ao1_raw !== prev_raw_ao) begin
+                raw_changes = raw_changes + 1;
+                prev_raw_ao = ao1_raw;
             end
 
             if (ao0_raw < min_ao)
@@ -154,13 +176,19 @@ task run_case;
             errors = errors + 1;
         end
 
+        if (raw_changes < 4) begin
+            $display("TB FAIL sweep %0s: ao1_raw changed too few times changes=%0d", label, raw_changes);
+            errors = errors + 1;
+        end
+
         if (v2pai_mv_in != 16'd0 && max_ao <= min_ao) begin
             $display("TB FAIL sweep %0s: ao0 range invalid min=%0d max=%0d", label, min_ao, max_ao);
             errors = errors + 1;
         end
 
-        $display("TB INFO sweep %0s: N_in=%0d N_safe=%0d V2Pai_mV=%0d Vref_code=%0d ao_min=%0d ao_max=%0d changes=%0d",
-                 label, n_in, dut.cfg_n_safe, v2pai_mv_in, dut.cfg_vdaref_code, min_ao, max_ao, changes);
+        $display("TB INFO sweep %0s: N_in=%0d N_safe=%0d V2Pai_mV=%0d Vref_code=%0d ao_min=%0d ao_max=%0d changes=%0d raw_changes=%0d",
+                 label, n_in, dut.cfg_n_safe, v2pai_mv_in, dut.cfg_vdaref_code,
+                 min_ao, max_ao, changes, raw_changes);
     end
 endtask
 

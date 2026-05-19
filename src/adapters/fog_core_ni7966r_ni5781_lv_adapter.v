@@ -2,8 +2,8 @@
 //
 // This wrapper follows the current "AI -> IP -> AO" wiring style:
 // - AI0 feeds the demodulation sample path
-// - AO0 outputs the main modulation word, with the original board's VDAREF
-//   reference-DAC scaling emulated in digital logic
+// - AO0 outputs the V2Pi-scaled phase-step waveform for the modulator
+// - AO1 exposes the raw ladhpi/daout phase-step word for observation
 // - cfg_V2Pai_mV is the half-wave voltage in millivolts, e.g. 1800 for 1.8 V
 // - cfg_N is accepted up to 1022 in LabVIEW mode; values outside 68..1022
 //   are clamped before entering the timing core
@@ -24,6 +24,7 @@ module fog_core_ni7966r_ni5781_lv_adapter #(
     input  wire [1:0]  ai_map_mode,
     input  wire [15:0] ai0_raw,
     output wire [15:0] ao0_raw,
+    output wire [15:0] ao1_raw,
     output wire signed [15:0] sp_sn_value,
     output wire        status_ready,
     output wire [1:0]  state_dbg,
@@ -46,13 +47,17 @@ wire [31:0] dvref_dbg_unused;
 wire [11:0] adin_mapped;
 wire [15:0] daout_unscaled;
 wire [15:0] vref_word;
-wire [48:0] ao0_scaled_product;
-wire [16:0] ao0_scaled_word;
 wire [15:0] cfg_v2pai_limited;
 wire [31:0] cfg_vdaref_scaled;
 wire [13:0] cfg_vdaref_code;
 wire [9:0] cfg_n_safe;
-reg [31:0] ao0_vref_product_r;
+reg        scale_busy;
+reg [5:0]  scale_phase;
+reg [15:0] scale_mod_latch;
+reg [15:0] scale_vref_latch;
+reg [31:0] scale_product1;
+reg [48:0] scale_product2;
+reg [15:0] ao0_raw_r;
 
 localparam [9:0] DEFAULT_N_SAFE =
     (DEFAULT_N < 10'd68) ? 10'd68 :
@@ -74,15 +79,46 @@ assign cfg_n_safe = (cfg_N < 10'd68) ? 10'd68 :
 assign cfg_v2pai_limited = (cfg_V2Pai_mV > 16'd2500) ? 16'd2500 : cfg_V2Pai_mV;
 assign cfg_vdaref_scaled = (cfg_v2pai_limited * 32'd26842) + 32'd2048;
 assign cfg_vdaref_code = (cfg_vdaref_scaled[31:12] > 20'd16383) ? 14'h3fff : cfg_vdaref_scaled[25:12];
-assign ao0_scaled_product = ({1'b0, ao0_vref_product_r} * VREF_RECIP_Q31) + 49'd1073741824;
-assign ao0_scaled_word = ao0_scaled_product[47:31];
-assign ao0_raw = (ao0_scaled_product[48] || ao0_scaled_word[16]) ? 16'hffff : ao0_scaled_word[15:0];
+assign ao0_raw = ao0_raw_r;
+assign ao1_raw = daout_unscaled;
 
 always @(posedge clk or negedge rst_n) begin
-    if (!rst_n)
-        ao0_vref_product_r <= 32'd0;
-    else
-        ao0_vref_product_r <= daout_unscaled * vref_word;
+    if (!rst_n) begin
+        scale_busy <= 1'b0;
+        scale_phase <= 6'd0;
+        scale_mod_latch <= 16'd0;
+        scale_vref_latch <= 16'd0;
+        scale_product1 <= 32'd0;
+        scale_product2 <= 49'd0;
+        ao0_raw_r <= 16'd0;
+    end else begin
+        if (!scale_busy) begin
+            scale_busy <= 1'b1;
+            scale_phase <= 6'd0;
+            scale_mod_latch <= daout_unscaled;
+            scale_vref_latch <= vref_word;
+            scale_product1 <= 32'd0;
+            scale_product2 <= 49'd0;
+        end else if (scale_phase < 6'd16) begin
+            if (scale_vref_latch[scale_phase[3:0]])
+                scale_product1 <= scale_product1 + ({{16{1'b0}}, scale_mod_latch} << scale_phase[3:0]);
+            scale_phase <= scale_phase + 1'b1;
+        end else if (scale_phase < 6'd32) begin
+            if (scale_phase == 6'd16)
+                scale_product2 <= 49'd1073741824;
+            if (VREF_RECIP_Q31[scale_phase[3:0]]) begin
+                if (scale_phase == 6'd16)
+                    scale_product2 <= 49'd1073741824 + {17'd0, scale_product1};
+                else
+                    scale_product2 <= scale_product2 + ({17'd0, scale_product1} << scale_phase[3:0]);
+            end
+            scale_phase <= scale_phase + 1'b1;
+        end else begin
+            ao0_raw_r <= (scale_product2[48] || scale_product2[47]) ?
+                         16'hffff : scale_product2[46:31];
+            scale_busy <= 1'b0;
+        end
+    end
 end
 
 ni5781_ai_to_adin12 u_ai_map (

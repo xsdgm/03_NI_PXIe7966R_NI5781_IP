@@ -8,6 +8,7 @@ reg         cfg_apply;
 reg  [9:0]  cfg_N;
 reg  [13:0] cfg_VDARef;
 reg  [7:0]  cfg_FBK;
+reg  [7:0]  cfg_FBK2;
 reg  [1:0]  ai_map_mode;
 reg  [15:0] ai0_raw;
 
@@ -66,6 +67,7 @@ fog_core_ni7966r dut (
     .cfg_N(cfg_N),
     .cfg_VDARef(cfg_VDARef),
     .cfg_FBK(cfg_FBK),
+    .cfg_FBK2(cfg_FBK2),
     .adin(adin_mapped),
     .ready(ready),
     .adclk(adclk),
@@ -177,6 +179,7 @@ initial begin
     cfg_N = 10'd170;
     cfg_VDARef = 14'd13280;
     cfg_FBK = 8'd100;
+    cfg_FBK2 = 8'd32;
     ai_map_mode = 2'b01;
     ai0_raw = 16'd0;
     errors = 0;

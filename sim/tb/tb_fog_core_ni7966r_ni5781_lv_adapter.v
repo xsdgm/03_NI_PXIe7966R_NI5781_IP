@@ -13,6 +13,7 @@ reg  [1:0]  ai_map_mode;
 reg  [15:0] ai0_raw;
 
 wire [15:0] ao0_raw;
+wire [15:0] ao1_raw;
 wire signed [15:0] sp_sn_value;
 wire        status_ready;
 wire [1:0]  state_dbg;
@@ -22,7 +23,9 @@ integer errors;
 integer cycles_after_ready;
 integer state_seen_mask;
 integer ao0_change_count;
+integer ao1_change_count;
 reg [15:0] ao0_prev;
+reg [15:0] ao1_prev;
 
 fog_core_ni7966r_ni5781_lv_adapter dut (
     .clk(clk),
@@ -35,6 +38,7 @@ fog_core_ni7966r_ni5781_lv_adapter dut (
     .ai_map_mode(ai_map_mode),
     .ai0_raw(ai0_raw),
     .ao0_raw(ao0_raw),
+    .ao1_raw(ao1_raw),
     .sp_sn_value(sp_sn_value),
     .status_ready(status_ready),
     .state_dbg(state_dbg),
@@ -57,13 +61,26 @@ always @(posedge clk) begin
         cycles_after_ready <= 0;
         state_seen_mask <= 0;
         ao0_change_count <= 0;
+        ao1_change_count <= 0;
         ao0_prev <= 16'h0000;
+        ao1_prev <= 16'h0000;
     end else begin
         cycles_after_ready <= cycles_after_ready + 1;
         state_seen_mask[state_dbg] <= 1'b1;
 
         if (^ao0_raw === 1'bx) begin
             $display("TB FAIL top: ao0_raw has X at t=%0t", $time);
+            errors <= errors + 1;
+        end
+
+        if (^ao1_raw === 1'bx) begin
+            $display("TB FAIL top: ao1_raw has X at t=%0t", $time);
+            errors <= errors + 1;
+        end
+
+        if (ao1_raw !== dut.daout_unscaled) begin
+            $display("TB FAIL top: ao1_raw=0x%04h expected raw daout=0x%04h at t=%0t",
+                     ao1_raw, dut.daout_unscaled, $time);
             errors <= errors + 1;
         end
 
@@ -87,6 +104,11 @@ always @(posedge clk) begin
             ao0_change_count <= ao0_change_count + 1;
             ao0_prev <= ao0_raw;
         end
+
+        if (ao1_raw !== ao1_prev) begin
+            ao1_change_count <= ao1_change_count + 1;
+            ao1_prev <= ao1_raw;
+        end
     end
 end
 
@@ -104,7 +126,9 @@ initial begin
     cycles_after_ready = 0;
     state_seen_mask = 0;
     ao0_change_count = 0;
+    ao1_change_count = 0;
     ao0_prev = 16'h0000;
+    ao1_prev = 16'h0000;
 
     $dumpfile("sim/icarus/tb_fog_core_ni7966r_ni5781_lv_adapter.vcd");
     $dumpvars(0, tb_fog_core_ni7966r_ni5781_lv_adapter);
@@ -135,9 +159,15 @@ initial begin
         errors = errors + 1;
     end
 
+    if (ao1_change_count < 4) begin
+        $display("TB FAIL top: ao1_raw changed too few times count=%0d", ao1_change_count);
+        errors = errors + 1;
+    end
+
     if (errors == 0) begin
-        $display("TB PASS top: ready=%0d state_mask=0x%0h ao0_changes=%0d adin_dbg=%0d ao0=0x%04h",
-                 status_ready, state_seen_mask, ao0_change_count, adin_dbg, ao0_raw);
+        $display("TB PASS top: ready=%0d state_mask=0x%0h ao0_changes=%0d ao1_changes=%0d adin_dbg=%0d ao0=0x%04h ao1=0x%04h",
+                 status_ready, state_seen_mask, ao0_change_count, ao1_change_count,
+                 adin_dbg, ao0_raw, ao1_raw);
     end else begin
         $display("TB FAIL top total_errors=%0d", errors);
     end

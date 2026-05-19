@@ -65,6 +65,16 @@ $sourceFiles = @(
     "src\core\angleoutputWithComp.v"
 )
 
+$resolvedSourceFiles = foreach ($file in $sourceFiles) {
+    Join-Path $projectRoot $file
+}
+
+$missingSourceFiles = @($resolvedSourceFiles | Where-Object { -not (Test-Path -LiteralPath $_) })
+if ($missingSourceFiles.Count -ne 0) {
+    $message = "Missing source file(s) for XST project:`n" + ($missingSourceFiles -join "`n")
+    throw $message
+}
+
 $projectFile = Join-Path $buildDir "$TopModule.prj"
 $xstFile = Join-Path $buildDir "$TopModule.xst"
 $syrFile = Join-Path $buildDir "$TopModule.syr"
@@ -78,8 +88,8 @@ if (-not (Test-Path $xstTmpDir)) {
 }
 attrib -R "$xstTmpDir" /S /D 2>$null
 
-$prjLines = foreach ($file in $sourceFiles) {
-    "verilog work `"$((Join-Path $projectRoot $file))`""
+$prjLines = foreach ($file in $resolvedSourceFiles) {
+    "verilog work `"$file`""
 }
 Set-Content -LiteralPath $projectFile -Value $prjLines -Encoding ASCII
 
@@ -104,9 +114,12 @@ Set-Content -LiteralPath $xstFile -Value $xstLines -Encoding ASCII
 Write-Host "Using XST:" $xstExe
 Write-Host "Using settings:" $settingsBat
 Write-Host "Toolchain:" $toolLabel
+Write-Host "Project root:" $projectRoot
 Write-Host "Top module:" $TopModule
 Write-Host "Target part:" $Part
 Write-Host "Output dir:" $buildDir
+Write-Host "Source files:"
+$resolvedSourceFiles | ForEach-Object { Write-Host "  " $_ }
 
 $batLines = @(
     "@echo off",

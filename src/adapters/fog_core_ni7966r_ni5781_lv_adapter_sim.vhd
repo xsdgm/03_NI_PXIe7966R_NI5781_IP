@@ -14,6 +14,7 @@ entity fog_core_ni7966r_ni5781_lv_adapter is
         ai_map_mode  : in  std_logic_vector(1 downto 0);
         ai0_raw      : in  std_logic_vector(15 downto 0);
         ao0_raw      : out std_logic_vector(15 downto 0);
+        ao1_raw      : out std_logic_vector(15 downto 0);
         sp_sn_value  : out std_logic_vector(15 downto 0);
         status_ready : out std_logic;
         state_dbg    : out std_logic_vector(1 downto 0);
@@ -27,7 +28,20 @@ architecture behavioral of fog_core_ni7966r_ni5781_lv_adapter is
     signal cfg_n_safe : unsigned(9 downto 0) := to_unsigned(170, 10);
     signal adin_mapped : unsigned(11 downto 0) := (others => '0');
     signal vref_word : unsigned(15 downto 0) := (others => '0');
+    signal base_word : unsigned(15 downto 0) := (others => '0');
     signal mod_word : unsigned(15 downto 0) := (others => '0');
+    signal loop_accum : signed(31 downto 0) := (others => '0');
+    signal scale_busy : std_logic := '0';
+    signal scale_phase : integer range 0 to 32 := 0;
+    signal scale_mod_latch : unsigned(15 downto 0) := (others => '0');
+    signal scale_vref_latch : unsigned(15 downto 0) := (others => '0');
+    signal scale_product1 : unsigned(31 downto 0) := (others => '0');
+    signal scale_product2 : unsigned(48 downto 0) := (others => '0');
+    signal ao0_raw_r : std_logic_vector(15 downto 0) := (others => '0');
+    signal ao1_raw_r : std_logic_vector(15 downto 0) := (others => '0');
+
+    constant AO0_RECIP_Q31 : unsigned(15 downto 0) := to_unsigned(40427, 16);
+    constant AO0_ROUND_Q31 : unsigned(48 downto 0) := to_unsigned(1073741824, 49);
 
     function clamp12(value : integer) return unsigned is
     begin
@@ -40,16 +54,6 @@ architecture behavioral of fog_core_ni7966r_ni5781_lv_adapter is
         end if;
     end function;
 
-    function clamp16(value : integer) return std_logic_vector is
-    begin
-        if value < 0 then
-            return std_logic_vector(to_unsigned(0, 16));
-        elsif value > 65535 then
-            return std_logic_vector(to_unsigned(65535, 16));
-        else
-            return std_logic_vector(to_unsigned(value, 16));
-        end if;
-    end function;
 begin
     process(cfg_N)
         variable n_tmp : integer;
@@ -67,10 +71,13 @@ begin
     process(clk, rst_n)
         variable half_count : integer;
         variable terminal_count : integer;
+        variable ai_error : integer;
+        variable drive : integer;
     begin
         if rst_n = '0' then
             state <= (others => '0');
             counter <= (others => '0');
+            loop_accum <= (others => '0');
         elsif rising_edge(clk) then
             half_count := to_integer(cfg_n_safe) / 2;
             if state(0) = '0' then
@@ -82,6 +89,10 @@ begin
             if to_integer(counter) >= terminal_count then
                 counter <= to_unsigned(1, 10);
                 state <= state + 1;
+
+                ai_error := to_integer(adin_mapped) - 2048;
+                drive := ai_error * (to_integer(unsigned(cfg_FBK)) + to_integer(unsigned(cfg_FBK2)));
+                loop_accum <= loop_accum + to_signed(drive, 32);
             else
                 counter <= counter + 1;
             end if;
@@ -126,17 +137,72 @@ begin
     begin
         case state is
             when "00" =>
-                mod_word <= to_unsigned(23254, 16);
+                base_word <= to_unsigned(23254, 16);
             when "01" =>
-                mod_word <= to_unsigned(2114, 16);
+                base_word <= to_unsigned(2114, 16);
             when "10" =>
-                mod_word <= to_unsigned(0, 16);
+                base_word <= to_unsigned(0, 16);
             when others =>
-                mod_word <= to_unsigned(21140, 16);
+                base_word <= to_unsigned(21140, 16);
         end case;
     end process;
 
-    ao0_raw      <= clamp16((to_integer(mod_word) * to_integer(vref_word)) / (13280 * 4));
+    mod_word <= unsigned(signed(base_word) + resize(loop_accum(26 downto 11), 16));
+
+    process(clk, rst_n)
+        variable recip_index : integer range 0 to 15;
+    begin
+        if rst_n = '0' then
+            scale_busy <= '0';
+            scale_phase <= 0;
+            scale_mod_latch <= (others => '0');
+            scale_vref_latch <= (others => '0');
+            scale_product1 <= (others => '0');
+            scale_product2 <= (others => '0');
+            ao0_raw_r <= (others => '0');
+            ao1_raw_r <= (others => '0');
+        elsif rising_edge(clk) then
+            if scale_busy = '0' then
+                scale_busy <= '1';
+                scale_phase <= 0;
+                scale_mod_latch <= mod_word;
+                scale_vref_latch <= vref_word;
+                scale_product1 <= (others => '0');
+                scale_product2 <= (others => '0');
+            elsif scale_phase < 16 then
+                if scale_vref_latch(scale_phase) = '1' then
+                    scale_product1 <= scale_product1 +
+                                      shift_left(resize(scale_mod_latch, 32), scale_phase);
+                end if;
+                scale_phase <= scale_phase + 1;
+            elsif scale_phase < 32 then
+                recip_index := scale_phase - 16;
+                if recip_index = 0 then
+                    scale_product2 <= AO0_ROUND_Q31;
+                end if;
+                if AO0_RECIP_Q31(recip_index) = '1' then
+                    if recip_index = 0 then
+                        scale_product2 <= AO0_ROUND_Q31 + resize(scale_product1, 49);
+                    else
+                        scale_product2 <= scale_product2 +
+                                          shift_left(resize(scale_product1, 49), recip_index);
+                    end if;
+                end if;
+                scale_phase <= scale_phase + 1;
+            else
+                if scale_product2(48) = '1' or scale_product2(47) = '1' then
+                    ao0_raw_r <= (others => '1');
+                else
+                    ao0_raw_r <= std_logic_vector(scale_product2(46 downto 31));
+                end if;
+                scale_busy <= '0';
+            end if;
+            ao1_raw_r <= std_logic_vector(mod_word);
+        end if;
+    end process;
+
+    ao0_raw      <= ao0_raw_r;
+    ao1_raw      <= ao1_raw_r;
     sp_sn_value  <= std_logic_vector(to_signed(1, 16)) when state = "01" else
                     std_logic_vector(to_signed(-1, 16)) when state = "10" else
                     std_logic_vector(to_signed(0, 16));

@@ -55,13 +55,16 @@ wire [7:0] FBK2;
 wire [31:0] dRotateOut;
 wire [31:0] dVrefOut;
 wire [31:0] dRotateOutFBK;
+wire [31:0] dVrefOutFBK;
+wire [31:0] first_loop_drive;
+wire [31:0] second_loop_drive;
+wire [31:0] closed_loop_drive;
 wire [31:0] intsout;
 wire [15:0] pintout;
 wire sdaSend;
 wire [11:0] tauCounter;
 wire updown;
 wire random;
-wire unused_fbk2;
 
 reg [9:0]  cfg_n_reg;
 reg [13:0] cfg_vdaref_reg;
@@ -83,7 +86,6 @@ assign N           = cfg_n_reg;
 assign VDARef      = cfg_vdaref_reg;
 assign FBK         = cfg_fbk_reg;
 assign FBK2        = cfg_fbk2_reg;
-assign unused_fbk2 = ^FBK2;
 assign vref_word   = pintout;
 assign ready       = sys_rst;
 assign state_dbg   = state;
@@ -94,6 +96,9 @@ assign tau_dbg     = tauCounter;
 assign intsout_dbg = intsout;
 assign drotate_dbg = dRotateOut;
 assign dvref_dbg   = dVrefOut;
+assign first_loop_drive = {dRotateOutFBK[28:0], 3'b0};
+assign second_loop_drive = {dVrefOutFBK[28:0], 3'b0};
+assign closed_loop_drive = first_loop_drive + second_loop_drive;
 
 always @(posedge clk or negedge rst_n) begin
     if (!rst_n) begin
@@ -168,11 +173,20 @@ dRtMultFBK dmk(
     .dRotateOutFBK(dRotateOutFBK)
 );
 
+dRtMultFBK dmk2(
+    .rst(sys_rst),
+    .intena0(intena0),
+    .clk(clk),
+    .FBK(FBK2),
+    .dRotateOut24(dVrefOut[23:0]),
+    .dRotateOutFBK(dVrefOutFBK)
+);
+
 integrator itg(
     .rst(sys_rst),
     .intena(intena),
     .clk(clk),
-    .dRotateOut({dRotateOutFBK[28:0], 3'b0}),
+    .dRotateOut(closed_loop_drive),
     .intsout(intsout)
 );
 
