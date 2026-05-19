@@ -26,6 +26,9 @@ integer state_mask;
 integer min_ao;
 integer max_ao;
 integer raw_changes;
+integer ao_gap;
+integer min_ao_gap;
+integer expected_half_cycles;
 reg [15:0] prev_ao;
 reg [15:0] prev_raw_ao;
 
@@ -63,7 +66,9 @@ endfunction
 function [9:0] expected_n_safe;
     input [9:0] n_in;
     begin
-        if (n_in < 10'd68)
+        if (n_in == 10'd0)
+            expected_n_safe = 10'd680;
+        else if (n_in < 10'd68)
             expected_n_safe = 10'd68;
         else if (n_in > 10'd1022)
             expected_n_safe = 10'd1022;
@@ -101,6 +106,9 @@ task run_case;
         min_ao = 65535;
         max_ao = 0;
         raw_changes = 0;
+        ao_gap = 0;
+        min_ao_gap = 32'h7fffffff;
+        expected_half_cycles = n_expect / 2;
         prev_ao = ao0_raw;
         prev_raw_ao = ao1_raw;
 
@@ -135,8 +143,13 @@ task run_case;
             end
 
             if (ao0_raw !== prev_ao) begin
+                if (changes != 0 && ao_gap < min_ao_gap)
+                    min_ao_gap = ao_gap;
+                ao_gap = 0;
                 changes = changes + 1;
                 prev_ao = ao0_raw;
+            end else begin
+                ao_gap = ao_gap + 1;
             end
 
             if (ao1_raw !== prev_raw_ao) begin
@@ -186,9 +199,15 @@ task run_case;
             errors = errors + 1;
         end
 
-        $display("TB INFO sweep %0s: N_in=%0d N_safe=%0d V2Pai_mV=%0d Vref_code=%0d ao_min=%0d ao_max=%0d changes=%0d raw_changes=%0d",
+        if (changes > 1 && min_ao_gap < (expected_half_cycles - 2)) begin
+            $display("TB FAIL sweep %0s: ao0 update too fast min_gap=%0d expected_half=%0d",
+                     label, min_ao_gap, expected_half_cycles);
+            errors = errors + 1;
+        end
+
+        $display("TB INFO sweep %0s: N_in=%0d N_safe=%0d V2Pai_mV=%0d Vref_code=%0d ao_min=%0d ao_max=%0d changes=%0d raw_changes=%0d min_ao_gap=%0d",
                  label, n_in, dut.cfg_n_safe, v2pai_mv_in, dut.cfg_vdaref_code,
-                 min_ao, max_ao, changes, raw_changes);
+                 min_ao, max_ao, changes, raw_changes, min_ao_gap);
     end
 endtask
 
@@ -196,7 +215,7 @@ initial begin
     clk = 1'b0;
     rst_n = 1'b0;
     cfg_apply = 1'b0;
-    cfg_N = 10'd170;
+    cfg_N = 10'd340;
     cfg_V2Pai_mV = 16'd1800;
     cfg_FBK = 8'd100;
     cfg_FBK2 = 8'd32;
@@ -207,9 +226,11 @@ initial begin
     $dumpfile("sim/icarus/tb_lv_adapter_config_sweep.vcd");
     $dumpvars(0, tb_lv_adapter_config_sweep);
 
+    run_case(10'd0,    16'd1800, "N zero uses default");
     run_case(10'd50,   16'd1800, "N below min");
-    run_case(10'd170,  16'd1800, "nominal");
-    run_case(10'd171,  16'd1800, "odd N coerced even");
+    run_case(10'd340,  16'd1800, "nominal");
+    run_case(10'd341,  16'd1800, "odd N coerced even");
+    run_case(10'd243,  16'd1800, "N 243 coerced to 242");
     run_case(10'd400,  16'd500,  "amp input limit");
     run_case(10'd1022, 16'd2500, "high safe limits");
     run_case(10'd1023, 16'd3000, "clamped high");
@@ -223,3 +244,4 @@ initial begin
 end
 
 endmodule
+

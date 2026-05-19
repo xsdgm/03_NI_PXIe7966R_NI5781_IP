@@ -5,11 +5,12 @@
 // - AO0 outputs the V2Pi-scaled phase-step waveform for the modulator
 // - AO1 exposes the raw ladhpi/daout phase-step word for observation
 // - cfg_V2Pai_mV is the half-wave voltage in millivolts, e.g. 1800 for 1.8 V
-// - cfg_N is accepted up to 1022 in LabVIEW mode; values outside 68..1022
-//   are clamped, then forced even, before entering the timing core
+// - cfg_N is accepted up to 1022 in LabVIEW mode; zero falls back to the
+//   default timing, and other values outside 68..1022 are clamped, then
+//   forced even, before entering the timing core
 // - sp_sn_value exposes the gyro pulse difference directly
 module fog_core_ni7966r_ni5781_lv_adapter #(
-    parameter [9:0]  DEFAULT_N       = 10'd170,
+    parameter [9:0]  DEFAULT_N       = 10'd680,
     parameter [15:0] DEFAULT_V2PAI_MV = 16'd1800,
     parameter [7:0]  DEFAULT_FBK     = 8'd100,
     parameter [7:0]  DEFAULT_FBK2    = 8'd32
@@ -58,6 +59,9 @@ reg [15:0] scale_mod_latch;
 reg [15:0] scale_vref_latch;
 reg [31:0] scale_product1;
 reg [48:0] scale_product2;
+reg [15:0] scale_last_mod;
+reg [15:0] scale_last_vref;
+reg        scale_last_valid;
 reg [15:0] ao0_raw_r;
 
 localparam [9:0] DEFAULT_N_SAFE =
@@ -75,7 +79,8 @@ localparam [15:0] VREF_RECIP_Q31 =
     (((49'd1 << 31) + (DEFAULT_VREF_WORD >> 1)) / DEFAULT_VREF_WORD);
 
 assign adin_dbg   = adin_mapped;
-assign cfg_n_clamped = (cfg_N < 10'd68) ? 10'd68 :
+assign cfg_n_clamped = (cfg_N == 10'd0) ? DEFAULT_N_SAFE :
+                       (cfg_N < 10'd68) ? 10'd68 :
                        (cfg_N > 10'd1022) ? 10'd1022 : cfg_N;
 assign cfg_n_safe = {cfg_n_clamped[9:1], 1'b0};
 assign cfg_v2pai_limited = (cfg_V2Pai_mV > 16'd2500) ? 16'd2500 : cfg_V2Pai_mV;
@@ -92,15 +97,24 @@ always @(posedge clk or negedge rst_n) begin
         scale_vref_latch <= 16'd0;
         scale_product1 <= 32'd0;
         scale_product2 <= 49'd0;
+        scale_last_mod <= 16'd0;
+        scale_last_vref <= 16'd0;
+        scale_last_valid <= 1'b0;
         ao0_raw_r <= 16'd0;
     end else begin
-        if (!scale_busy) begin
+        if (!scale_busy &&
+            (!scale_last_valid ||
+             daout_unscaled != scale_last_mod ||
+             vref_word != scale_last_vref)) begin
             scale_busy <= 1'b1;
             scale_phase <= 6'd0;
             scale_mod_latch <= daout_unscaled;
             scale_vref_latch <= vref_word;
             scale_product1 <= 32'd0;
             scale_product2 <= 49'd0;
+            scale_last_mod <= daout_unscaled;
+            scale_last_vref <= vref_word;
+            scale_last_valid <= 1'b1;
         end else if (scale_phase < 6'd16) begin
             if (scale_vref_latch[scale_phase[3:0]])
                 scale_product1 <= scale_product1 + ({{16{1'b0}}, scale_mod_latch} << scale_phase[3:0]);
@@ -164,3 +178,4 @@ fog_core_ni7966r #(
 );
 
 endmodule
+

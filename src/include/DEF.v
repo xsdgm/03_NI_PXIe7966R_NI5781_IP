@@ -2,7 +2,7 @@
 
 //定义最小度越时间
 `ifndef NTAU
-`define NTAU 170
+`define NTAU 340
 `endif
 
 //定义位移周期
@@ -13,3 +13,4 @@
 //dTauInt.v
 //integrator.v
 //angleoutputWithComp.v
+

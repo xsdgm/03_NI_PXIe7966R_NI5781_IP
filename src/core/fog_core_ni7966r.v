@@ -4,7 +4,7 @@
 // This wrapper keeps the original four-state square-wave modulation algorithm,
 // but removes the Cyclone-specific PLL, pin constraints, and MCU SPI config path.
 module fog_core_ni7966r #(
-    parameter [9:0]  DEFAULT_N       = 10'd170,
+    parameter [9:0]  DEFAULT_N       = 10'd340,
     parameter [13:0] DEFAULT_VDAREF  = 14'd13280,
     parameter [7:0]  DEFAULT_FBK     = 8'd100,
     parameter [7:0]  DEFAULT_FBK2    = 8'd32,
@@ -252,3 +252,4 @@ angleoutputWithComp agowc(
 );
 
 endmodule
+

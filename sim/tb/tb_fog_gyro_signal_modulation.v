@@ -199,7 +199,7 @@ initial begin
     clk = 1'b0;
     rst_n = 1'b0;
     cfg_apply = 1'b0;
-    cfg_N = 10'd170;
+    cfg_N = 10'd340;
     cfg_VDARef = 14'd13280;
     cfg_FBK = 8'd100;
     cfg_FBK2 = 8'd32;
@@ -220,7 +220,7 @@ initial begin
     avg_state3 = 0;
     avg_seg1 = 0;
     avg_seg2 = 0;
-    period_expected = 85;
+    period_expected = 170;
     state_period_len = 0;
     state_period_prev = 0;
 
@@ -319,3 +319,4 @@ initial begin
 end
 
 endmodule
+

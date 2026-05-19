@@ -22,10 +22,14 @@ entity fog_core_ni7966r_ni5781_lv_adapter is
     );
 end entity;
 
+library ieee;
+use ieee.std_logic_1164.all;
+use ieee.numeric_std.all;
+
 architecture behavioral of fog_core_ni7966r_ni5781_lv_adapter is
     signal state : unsigned(1 downto 0) := (others => '0');
     signal counter : unsigned(9 downto 0) := (others => '0');
-    signal cfg_n_safe : unsigned(9 downto 0) := to_unsigned(170, 10);
+    signal cfg_n_safe : unsigned(9 downto 0) := to_unsigned(680, 10);
     signal adin_mapped : unsigned(11 downto 0) := (others => '0');
     signal vref_word : unsigned(15 downto 0) := (others => '0');
     signal base_word : unsigned(15 downto 0) := (others => '0');
@@ -37,6 +41,9 @@ architecture behavioral of fog_core_ni7966r_ni5781_lv_adapter is
     signal scale_vref_latch : unsigned(15 downto 0) := (others => '0');
     signal scale_product1 : unsigned(31 downto 0) := (others => '0');
     signal scale_product2 : unsigned(48 downto 0) := (others => '0');
+    signal scale_last_mod : std_logic_vector(15 downto 0) := (others => '0');
+    signal scale_last_vref : std_logic_vector(15 downto 0) := (others => '0');
+    signal scale_last_valid : std_logic := '0';
     signal ao0_raw_r : std_logic_vector(15 downto 0) := (others => '0');
     signal ao1_raw_r : std_logic_vector(15 downto 0) := (others => '0');
     signal cfg_apply_d : std_logic := '0';
@@ -58,7 +65,9 @@ architecture behavioral of fog_core_ni7966r_ni5781_lv_adapter is
     function sanitize_n(value : integer) return unsigned is
         variable clamped : integer;
     begin
-        if value < 68 then
+        if value = 0 then
+            clamped := 680;
+        elsif value < 68 then
             clamped := 68;
         elsif value > 1022 then
             clamped := 1022;
@@ -78,7 +87,7 @@ begin
         if rst_n = '0' then
             state <= (others => '0');
             counter <= to_unsigned(1, 10);
-            cfg_n_safe <= to_unsigned(170, 10);
+            cfg_n_safe <= to_unsigned(680, 10);
             loop_accum <= (others => '0');
             cfg_apply_d <= '0';
         elsif rising_edge(clk) then
@@ -171,16 +180,25 @@ begin
             scale_vref_latch <= (others => '0');
             scale_product1 <= (others => '0');
             scale_product2 <= (others => '0');
+            scale_last_mod <= (others => '0');
+            scale_last_vref <= (others => '0');
+            scale_last_valid <= '0';
             ao0_raw_r <= (others => '0');
             ao1_raw_r <= (others => '0');
         elsif rising_edge(clk) then
-            if scale_busy = '0' then
+            if scale_busy = '0' and
+               (scale_last_valid = '0' or
+                std_logic_vector(mod_word) /= scale_last_mod or
+                std_logic_vector(vref_word) /= scale_last_vref) then
                 scale_busy <= '1';
                 scale_phase <= 0;
                 scale_mod_latch <= mod_word;
                 scale_vref_latch <= vref_word;
                 scale_product1 <= (others => '0');
                 scale_product2 <= (others => '0');
+                scale_last_mod <= std_logic_vector(mod_word);
+                scale_last_vref <= std_logic_vector(vref_word);
+                scale_last_valid <= '1';
             elsif scale_phase < 16 then
                 if scale_vref_latch(scale_phase) = '1' then
                     scale_product1 <= scale_product1 +
@@ -222,3 +240,4 @@ begin
     state_dbg    <= std_logic_vector(state);
     adin_dbg     <= std_logic_vector(adin_mapped);
 end architecture;
+

@@ -116,7 +116,7 @@ initial begin
     clk = 1'b0;
     rst_n = 1'b0;
     cfg_apply = 1'b0;
-    cfg_N = 10'd170;
+    cfg_N = 10'd340;
     cfg_V2Pai_mV = 16'd1800;
     cfg_FBK = 8'd100;
     cfg_FBK2 = 8'd32;
@@ -176,3 +176,4 @@ initial begin
 end
 
 endmodule
+
